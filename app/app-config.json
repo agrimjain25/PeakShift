@@ -1,0 +1,12 @@
+{
+    "command":  "python3 -u app.py",
+    "memory":  512,
+    "env_variables":  {
+                          "QUICKML_ENVIRONMENT":  "Development",
+                          "ZOHO_ACCOUNTS_URL":  "https://accounts.zoho.in",
+                          "USE_DATASTORE":  "1",
+                          "DATASTORE_TABLE":  "forecast_runs"
+                      },
+    "build_path":  "C:\\Users\\Agrim Jain\\Downloads\\PeakShift_Submission\\PeakShift\\app",
+    "stack":  "python_3_9"
+}

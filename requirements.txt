@@ -1,0 +1,4 @@
+# Only needed for predict.py and test_eval.py. The web app itself uses the Python standard library only.
+pandas
+numpy
+requests

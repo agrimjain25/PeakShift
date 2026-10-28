@@ -1,0 +1,18 @@
+# secrets: never commit these
+.env
+*.env
+!.env.example
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# generated locally
+predictions.csv
+peakshift-logs/
+runs.jsonl
+node_modules/
+
+# catalyst CLI state (keep catalyst.json, ignore local caches)
+.catalystrc

@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PeakShift: microgrid dispatch console</title>
+<meta name="description" content="Forecasts the next 24 hours of microgrid demand with a Zoho Catalyst QuickML model and decides, hour by hour, whether to run on the main grid or on renewable storage.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2310282C'/%3E%3Cpath d='M4 22 C9 22 10 8 16 8 S22 22 28 22' fill='none' stroke='%23D99A00' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the forecast</a>
+
+<header class="top">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="9" class="mark-bg"/><path d="M5 28 C11 28 12 10 20 10 S29 28 35 28" class="mark-curve"/><circle cx="20" cy="10" r="3" class="mark-dot"/></svg>
+    <div>
+      <h1>PeakShift</h1>
+      <p>Microgrid dispatch console</p>
+    </div>
+  </div>
+  <div class="top-right">
+    <span id="model-pill" class="pill pill-wait" role="status" aria-live="polite">Contacting model</span>
+    <button id="theme-toggle" class="icon-btn" type="button" aria-label="Switch colour theme">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- ======================= Scenario rail ======================= -->
+  <aside class="rail" aria-label="Scenario settings">
+    <form id="scenario" autocomplete="off" aria-label="Scenario">
+      <section class="rail-block">
+        <h2>Weather for the next 24 hours</h2>
+        <div class="tabs" role="tablist" aria-label="How to enter weather">
+          <button type="button" role="tab" id="tab-preset" aria-controls="pane-preset" aria-selected="true">Real days</button>
+          <button type="button" role="tab" id="tab-manual" aria-controls="pane-manual" aria-selected="false" tabindex="-1">Type in</button>
+          <button type="button" role="tab" id="tab-csv" aria-controls="pane-csv" aria-selected="false" tabindex="-1">Upload CSV</button>
+        </div>
+
+        <div id="pane-preset" role="tabpanel" aria-labelledby="tab-preset">
+          <div id="preset-list" class="preset-list"></div>
+          <p class="hint">Four real days from the starter data. Weather only: the model predicts the demand live.</p>
+        </div>
+
+        <div id="pane-manual" role="tabpanel" aria-labelledby="tab-manual" hidden>
+          <label class="field">
+            <span>First hour</span>
+            <input type="datetime-local" id="manual-start" step="3600">
+          </label>
+          <div class="grid-scroll">
+            <table class="manual" aria-label="Hourly weather">
+              <thead><tr><th scope="col">Hour</th><th scope="col">Temp °C</th><th scope="col">Humidity %</th><th scope="col">Solar W/m²</th></tr></thead>
+              <tbody id="manual-body"></tbody>
+            </table>
+          </div>
+          <p class="hint">Starts from the day you last picked, so you can change a few hours. Leave a box empty and it is filled from the hours around it.</p>
+        </div>
+
+        <div id="pane-csv" role="tabpanel" aria-labelledby="tab-csv" hidden>
+          <label class="drop" id="drop" for="csv-file">
+            <input type="file" id="csv-file" accept=".csv,text/csv">
+            <strong id="csv-title">Choose a CSV file</strong>
+            <span id="csv-sub">or drop it here</span>
+          </label>
+          <p class="hint">Columns: timestamp, ambient_temp_c, humidity_pct, solar_irradiance_wm2. One row per hour.
+            <button type="button" class="link" id="csv-template">Download a template</button></p>
+        </div>
+      </section>
+
+      <section class="rail-block">
+        <h2>Heatwave stress test</h2>
+        <label class="field" for="stress">
+          <span>Warmer by <output id="stress-out" for="stress">0 °C</output></span>
+          <input type="range" id="stress" min="-5" max="8" step="1" value="0">
+        </label>
+        <p class="hint" id="stress-hint">Moves every hour's temperature, and humidity with it, then asks the model again.</p>
+      </section>
+
+      <section class="rail-block">
+        <h2>Battery and solar</h2>
+        <div class="two">
+          <label class="field"><span>Battery size, kWh</span><input type="number" id="b-capacity" min="100" max="50000" step="100" inputmode="numeric"></label>
+          <label class="field"><span>Starting charge, %</span><input type="number" id="b-initial" min="0" max="100" step="5" inputmode="numeric"></label>
+          <label class="field"><span>Solar array, kWp</span><input type="number" id="b-pv" min="0" max="5000" step="50" inputmode="numeric"></label>
+        </div>
+        <details class="more">
+          <summary>More battery settings</summary>
+          <div class="two">
+            <label class="field"><span>Reserve, %</span><input type="number" id="b-reserve" min="0" max="50" step="5" inputmode="numeric"></label>
+            <label class="field"><span>Max discharge, kW</span><input type="number" id="b-discharge" min="10" max="5000" step="10" inputmode="numeric"></label>
+            <label class="field"><span>Max charge, kW</span><input type="number" id="b-charge" min="10" max="5000" step="10" inputmode="numeric"></label>
+          </div>
+        </details>
+      </section>
+
+      <div class="run-bar">
+        <button type="submit" id="run" class="primary">Run forecast</button>
+        <p id="form-msg" class="form-msg" role="alert"></p>
+      </div>
+    </form>
+  </aside>
+
+  <!-- ======================= Main ======================= -->
+  <main id="main" class="main" tabindex="-1">
+    <a class="jump" href="#scenario">Change the weather or battery settings</a>
+    <div id="banner" class="banner" hidden role="alert"></div>
+    <div id="error" class="error" hidden role="alert"></div>
+
+    <section class="now" aria-labelledby="now-h">
+      <div class="state" id="state" aria-live="polite">
+        <h2 id="now-h" class="sr">Active state</h2>
+        <div class="state-time"><span id="st-clock">--:--</span><small id="st-date"></small></div>
+        <div id="st-badge" class="badge badge-wait"><i></i><span>Waiting for forecast</span></div>
+        <dl class="state-facts">
+          <div><dt>Demand</dt><dd><b id="st-demand">--</b> kW <small id="st-range"></small></dd></div>
+          <div><dt>Battery</dt><dd><b id="st-soc">--</b>%<small id="st-flow"></small></dd></div>
+        </dl>
+        <div class="soc-bar" aria-hidden="true"><div id="st-soc-fill"></div></div>
+        <p id="st-why" class="state-why"></p>
+        <p id="st-sure" class="state-sure"></p>
+        <div id="st-chips" class="chips"></div>
+      </div>
+
+      <figure class="hero" aria-labelledby="hero-cap">
+        <figcaption id="hero-cap">
+          <h2>Load forecast and dispatch</h2>
+          <p id="hero-sub">Predicted demand for each hour, with the source chosen for it.</p>
+        </figcaption>
+        <div id="hero-chart" class="chart" tabindex="0" role="application" aria-label="Load forecast chart. Use left and right arrow keys to move through the hours."></div>
+        <div class="legend" aria-hidden="true">
+          <span><i class="sw sw-grid"></i>Main grid</span>
+          <span><i class="sw sw-storage"></i>Renewable storage</span>
+          <span><i class="sw sw-alert"></i>Critical overload</span>
+          <span><i class="sw sw-band"></i>Likely range</span>
+          <span id="legend-base" hidden><i class="sw sw-base"></i>Before stress test</span>
+        </div>
+        <div class="replay">
+          <button type="button" id="play" class="ghost"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="play-icon" d="M8 5v14l11-7z"/></svg><span id="play-label">Replay the day</span></button>
+          <label class="scrub"><span class="sr">Hour shown</span><input type="range" id="scrub" min="0" max="23" value="0" aria-label="Hour shown"></label>
+          <span class="replay-note">Simulated clock. The forecast is not live telemetry.</span>
+        </div>
+      </figure>
+    </section>
+
+    <section class="kpis" aria-label="Summary of the window" id="kpis"></section>
+
+    <section class="notes" aria-labelledby="notes-h">
+      <h2 id="notes-h">What to watch</h2>
+      <ul id="advisories" class="advisories"></ul>
+    </section>
+
+    <section class="pair">
+      <figure class="panel" aria-labelledby="soc-cap">
+        <figcaption id="soc-cap"><h2>Battery charge</h2><p id="soc-sub">Charge level through the window, and power in and out.</p></figcaption>
+        <div id="soc-chart" class="chart chart-soc"></div>
+        <div class="legend" aria-hidden="true">
+          <span><i class="sw sw-soc"></i>Charge level</span>
+          <span><i class="sw sw-storage"></i>Discharging</span>
+          <span><i class="sw sw-charge"></i>Charging</span>
+          <span><i class="sw sw-reserve"></i>Reserve</span>
+        </div>
+      </figure>
+
+      <section class="panel" aria-labelledby="sig-h">
+        <div class="panel-head">
+          <div><h2 id="sig-h">Control signals</h2><p>Sent whenever the source changes or an overload starts.</p></div>
+          <div class="btn-row">
+            <button type="button" class="ghost" id="sig-json-toggle" aria-expanded="false" aria-controls="sig-json">JSON</button>
+            <button type="button" class="ghost" id="sig-copy">Copy</button>
+          </div>
+        </div>
+        <ol id="signals" class="signals"></ol>
+        <pre id="sig-json" class="json" hidden tabindex="0"></pre>
+      </section>
+    </section>
+
+    <section class="panel" aria-labelledby="hours-h">
+      <div class="panel-head">
+        <div><h2 id="hours-h">Hour by hour</h2><p>Every decision, with how sure we are about it.</p></div>
+        <button type="button" class="ghost" id="dl-csv">Download schedule (CSV)</button>
+      </div>
+      <div class="table-scroll">
+        <table class="hours" id="hours-table">
+          <thead>
+            <tr>
+              <th scope="col">Hour</th><th scope="col" class="num">Demand kW</th><th scope="col" class="num">Likely range</th>
+              <th scope="col">Source</th><th scope="col">Alert</th><th scope="col" class="num">Sure about source</th><th scope="col" class="num">Battery</th><th scope="col">Note</th>
+            </tr>
+          </thead>
+          <tbody id="hours-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="trio">
+      <section class="panel" aria-labelledby="dq-h">
+        <h2 id="dq-h">Data check</h2>
+        <ul id="dq" class="checks"></ul>
+      </section>
+      <section class="panel" aria-labelledby="model-h">
+        <h2 id="model-h">The model</h2>
+        <div id="model-box"></div>
+      </section>
+      <section class="panel" aria-labelledby="log-h">
+        <h2 id="log-h">Run log</h2>
+        <p id="log-store" class="hint"></p>
+        <div class="table-scroll small">
+          <table class="log">
+            <thead><tr><th scope="col">Time</th><th scope="col">Input</th><th scope="col" class="num">Peak</th><th scope="col" class="num">Alert hours</th></tr></thead>
+            <tbody id="log-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <section class="panel rules" aria-labelledby="rules-h">
+      <h2 id="rules-h">How the decisions are made</h2>
+      <div class="rules-grid">
+        <div><h3>Renewable storage</h3><p>When predicted demand is above 160 kW, or the hour is between 18:00 and 22:59.</p></div>
+        <div><h3>Main grid</h3><p>When demand is 160 kW or less and the hour is outside that window.</p></div>
+        <div><h3>Critical overload</h3><p>When demand reaches 200 kW. This is separate from the source and can happen in either.</p></div>
+        <div><h3>Battery model</h3><p>Solar covers the load first. In storage hours the battery covers the rest down to its reserve; the grid helps if it runs out. In grid hours spare solar charges it, then the grid tops it up while total draw stays under 160 kW. The figures come from the settings on the left.</p></div>
+        <div><h3>Likely range and certainty</h3><p>The band is the typical model error of about 10 kW either side. "Sure about source" is the chance the call stays the same if the true demand differs by that much.</p></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer class="foot">
+  <span>PeakShift · HackSphere 3.0 · Forecasts from a model trained and published in Zoho Catalyst QuickML</span>
+</footer>
+
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
