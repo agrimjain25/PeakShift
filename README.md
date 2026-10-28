@@ -7,7 +7,7 @@ PeakShift forecasts the next 24 hours of microgrid demand with a regression mode
 battery storage**, raises **critical overload** alerts, and shows the whole plan on a dashboard hosted on
 **Zoho Catalyst AppSail**.
 
-* **Live app:** `<paste the public Catalyst URL here>`
+* **Live app:** https://peakshift-50047164924.development.catalystappsail.in
 * **Model endpoint:** QuickML pipeline `demand_forecast_v1`, endpoint `demand_forecast_endpoint`
 
 > Screenshots: add real ones from the deployed app to `docs/screenshots/` and link them here.
